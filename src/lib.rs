@@ -1,3 +1,3 @@
 mod model;
 
-pub use model::{Analytics, KYDSensorsData};
+pub use model::{Analytics, KYDApi};

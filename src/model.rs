@@ -46,24 +46,23 @@ pub struct Analytics {
 }
 
 impl Analytics {
-    pub fn with_sensor_data(&mut self, sensor_data: KYDSensorsData) -> &mut Self {
-        let KYDSensorsData {
-            ts,
-            cnt_in,
-            cnt_out,
-            sensor_co2,
-            sensor_pressure,
-            sensor_temperature,
-        } = sensor_data;
-
-        self.time = ts;
-        self.data.analytics_result.cnt_in = cnt_in;
-        self.data.analytics_result.cnt_out = cnt_out;
-        self.data.analytics_result.sensor_co2 = sensor_co2;
-        self.data.analytics_result.sensor_pressure = sensor_pressure;
-        self.data.analytics_result.sensor_temperature = sensor_temperature;
-
-        self
+    pub fn fill_device_data(&mut self, device_data: KYDDeviceDataLogEntry) {
+        match device_data.data {
+            KYDDeviceDataType::HumanEntranceCounter { mode: _, counter } => {
+                self.data.analytics_result.cnt_in = counter.cnt_in;
+                self.data.analytics_result.cnt_out = counter.cnt_out;
+            }
+            KYDDeviceDataType::PASCO2Sensor {
+                co2,
+                pressure,
+                temp,
+            } => {
+                self.data.analytics_result.sensor_co2 = co2;
+                self.data.analytics_result.sensor_pressure = pressure;
+                self.data.analytics_result.sensor_temperature = temp;
+            }
+        };
+        self.time = device_data.ts;
     }
 }
 
@@ -110,27 +109,54 @@ struct ObjectsInfo {
     probability: f64,
 }
 
-#[derive(Deserialize, Default)]
-pub struct KYDSensorsData {
-    ts: String,
-    cnt_in: usize,
-    cnt_out: usize,
-    sensor_co2: usize,
-    sensor_pressure: usize,
-    sensor_temperature: usize,
+#[derive(Deserialize)]
+pub struct KYDApi {}
+
+#[derive(Deserialize, Debug)]
+pub struct KYDDeviceDataLog {
+    success: bool,
+    msg: String,
+    pub data: Vec<KYDDeviceDataLogEntry>,
 }
 
-impl KYDSensorsData {
-    pub async fn fetch() -> Result<Self, Box<dyn std::error::Error>> {
+#[derive(Deserialize, Debug)]
+pub struct KYDDeviceDataLogEntry {
+    _id: String,
+    id: String,
+    ts: String,
+    #[serde(rename = "type")]
+    sensor_type: usize,
+    data: KYDDeviceDataType,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+pub enum KYDDeviceDataType {
+    HumanEntranceCounter {
+        mode: usize,
+        counter: Inout,
+    },
+    PASCO2Sensor {
+        co2: usize,
+        pressure: usize,
+        temp: usize,
+    },
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Inout {
+    #[serde(rename = "in")]
+    cnt_in: usize,
+    #[serde(rename = "out")]
+    cnt_out: usize,
+}
+
+impl KYDApi {
+    pub async fn fetch(device_id: String) -> Result<KYDDeviceDataLog, Box<dyn std::error::Error>> {
         let client = Client::new();
-        let _request = client.request(Method::GET, "https://services.aidery.io/data-log/id").bearer_auth("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYzZGI1OGZmNzM5MTk4NDg3NWFlZTZhZCIsInJvbGUiOjUwLCJpYXQiOjE2NzUzMTk1NTF9.U2pyt_pAC1BkxA36L_CayZ3NXxvpFMn_ZbGqvP3rr1I");
-        Ok(Self {
-            ts: "2023-03-29T11:14:32.488Z".into(),
-            cnt_in: 99,
-            cnt_out: 99,
-            sensor_co2: 1000,
-            sensor_pressure: 1000,
-            sensor_temperature: 1000,
-        })
+        let request = client.request(Method::GET, format!("https://services.aidery.io/data-log/id?deviceId={device_id}&sort=-ts&limit=1")).bearer_auth("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYzZGI1OGZmNzM5MTk4NDg3NWFlZTZhZCIsInJvbGUiOjUwLCJpYXQiOjE2NzUzMTk1NTF9.U2pyt_pAC1BkxA36L_CayZ3NXxvpFMn_ZbGqvP3rr1I");
+        let entries = request.send().await?.json::<KYDDeviceDataLog>().await?;
+
+        Ok(entries)
     }
 }
